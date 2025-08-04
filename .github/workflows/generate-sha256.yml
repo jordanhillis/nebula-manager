@@ -1,0 +1,42 @@
+name: Generate SHA-256 File
+
+concurrency:
+  group: push-to-main
+  cancel-in-progress: false
+
+on:
+  push:
+    paths:
+      - 'nebula-manager.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-sha:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Generate SHA-256 hash file
+        run: |
+          sha256sum nebula-manager.sh > nebula-manager.sh.sha256
+          cat nebula-manager.sh.sha256
+
+      - name: Commit .sha256 file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add nebula-manager.sh.sha256
+          git commit -m "Auto-update SHA-256 for nebula-manager.sh" || echo "No changes to commit"
+
+          for i in {1..5}; do
+            git pull --rebase --autostash && git push && break || sleep 5
+          done          
