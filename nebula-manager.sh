@@ -1788,11 +1788,11 @@ show_system_info() {
         # Get service uptime
         echo -e "$(show_status 'success') ${BOLD}${YELLOW}Uptime:${RESET} $(date -ud@$(($(date +%s) - $(date -d"$(systemctl show "$service_name" --property=ActiveEnterTimestamp | cut -d'=' -f2)" +%s))) +%T | awk -F: '{print $1" hrs, "$2" min, "$3" sec"}')"
         # Extract the interface name from config.yml
-        local interface=$(grep '^ *dev:' "$nebula_config" | awk '{print $2}')
-        local ip_addr=$(ip addr show "$interface" | grep 'inet ' | awk '{print $2}')
-        # Extract the listen host and port by searching within the listen block
-        local bind_host=$(awk '/listen:/,/port:/{if ($1 == "host:") print $2}' "$nebula_config")
-        local bind_port=$(awk '/listen:/,/port:/{if ($1 == "port:") print $2}' "$nebula_config")        
+        local interface=$(awk -F: '/^[[:space:]]*dev[[:space:]]*:/ {gsub(/\r|\n/,"",$2);gsub(/^[ \t]+|[ \t]+$/,"",$2);print $2;exit}' "$nebula_config")
+        local ip_addr=$(ip -o -4 addr show "$interface" | awk '{print $4}' | cut -d/ -f1)
+        # # Extract the listen host and port by searching within the listen block
+        local bind_host=$(awk '/listen:/,/port:/{if($1~/^host:/){gsub(/\r|\n|"/,"",$2);print $2}}' "$nebula_config")
+        local bind_port=$(awk '/listen:/,/port:/{if($1~/^port:/){gsub(/\r|\n|"/,"",$2);print $2}}' "$nebula_config")
         echo -e "$(show_status 'success') ${BOLD}${YELLOW}Network:${RESET} $ip_addr - $interface ($bind_host:$bind_port)"
         # Check if the service is configured as a Lighthouse
         echo -e -n "$(show_status 'success') ${BOLD}${YELLOW}State:${RESET} "
@@ -2040,7 +2040,7 @@ select_nebula_server() {
             cfg="$dir/config.yml"
             iface=""
             ip_net="[${GRAY}N/A${RESET}]"
-            [[ -r "$cfg" ]] && iface=$(awk -F: '/^[[:space:]]*dev[[:space:]]*:/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit}' "$cfg" 2>/dev/null)
+            [[ -r "$cfg" ]] && iface=$(awk -F: '/^[[:space:]]*dev[[:space:]]*:/ {gsub(/\r|\n/, "", $2); gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit}' "$cfg" 2>/dev/null)
             # Decide Active/Inactive using a single ip query each (quiet on errors)
             if [[ -n "$iface" ]]; then
                 link_out="$(ip -o link show "$iface" 2>/dev/null)"
