@@ -3,7 +3,7 @@
 ###################################################################
 ########################## Configuration ##########################
 ###################################################################
-SERVER_CONF="/etc/nebula/nebula-manager.conf"                                                                           # Nebula Manager conf file location
+SERVER_CONF="/etc/nebula/nebula-manager.conf"                                                                       # Nebula Manager conf file location
 ###################################################################
 ###################################################################
 
@@ -389,14 +389,19 @@ restart_nebula_servers() {
     rm -f /tmp/nebula_failed_*
     mapfile -t servers < <(
         awk '
-            /^\[server\.[^]]+\]/ {
-                server = substr($0, 9, length($0) - 9 - 1)
-                in_server = 1
+            { sub(/\r$/, ""); gsub(/^[ \t]+|[ \t]+$/, "") }  # strip CR + trim spaces
+            /^[[:space:]]*#/ { next }                        # skip full-line comments
+            { sub(/[[:space:]]*#.*$/, "") }                  # strip inline comments
+            /^[[:space:]]*$/ { next }                        # skip empty
+            /^\[server\.[^]]+\][[:space:]]*$/ {
+                line = $0
+                sub(/^\[server\./, "", line)                 # remove "[server."
+                sub(/\][[:space:]]*$/, "", line)             # remove trailing "]"
+                server = line
                 next
             }
-            /^\[.*\]/ { in_server = 0 }
-            in_server && /^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true[[:space:]]*$/ {
-                print server
+            /^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true[[:space:]]*$/ {
+                if (server != "") print server
             }
         ' "$SERVER_CONF"
     )
@@ -408,7 +413,10 @@ restart_nebula_servers() {
         # Load server config into temporary variables
         eval "$(
             awk -F= -v s="server.$SERVER_NAME_TEMP" '
-                { sub(/\r$/, "") }
+                { sub(/\r$/, ""); gsub(/^[ \t]+|[ \t]+$/, "") }  # strip CR + trim spaces
+                /^[[:space:]]*#/ { next }                        # skip full-line comments
+                { sub(/[[:space:]]*#.*$/, "") }                  # strip inline comments
+                /^[[:space:]]*$/ { next }                        # skip empty
                 /^\[server\.[^]]+\]/ {
                     in_server = ($0 == "[" s "]"); next
                 }
