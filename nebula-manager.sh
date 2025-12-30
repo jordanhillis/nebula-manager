@@ -13,7 +13,7 @@ SERVER_CONF="/etc/nebula/nebula-manager.conf"                                   
 SERVER_CONF_URL="https://raw.githubusercontent.com/jordanhillis/nebula-manager/refs/heads/main/nebula-manager.conf" # Template URL for Nebula Manager conf file  
 NEBULA_TEMPLATE_URL="https://raw.githubusercontent.com/slackhq/nebula/refs/heads/master/examples/config.yml"        # Template URL for Nebula config.yml
 NEBULA_API_RELEASES_URL="https://api.github.com/repos/slackhq/nebula/releases/latest"                               # API URL to latest release of Nebula
-VERSION="1.0.0"                                                                                                     # Script version
+VERSION="1.1.0"                                                                                                     # Script version
 declare -A PKG_BASE=(
   [awk]="gawk"
   [curl]="curl"
@@ -655,6 +655,23 @@ show_menu_header() {
     echo -e "${bold}${CYAN}=~=~=~=~=~=~=~=~=~=~=~[ ${styled_path}${CYAN} ]~=~=~=~=~=~=~=~=~=~=~=${reset}"
 }
 
+# Normalizes output to always return an object (not array) regardless of nebula-cert version
+nebula_cert_json() {
+    local bin_path="$1"
+    local cert_path="$2"
+    "$bin_path/nebula-cert" print -json -path "$cert_path" 2>/dev/null | \
+        jq -r '
+            if type == "array" then .[0] else . end |
+            if .details.networks and (.details.ips | not) then
+                .details.ips = .details.networks
+            elif .details.ips and (.details.networks | not) then
+                .details.networks = .details.ips
+            else
+                .
+            end
+        ' 2>/dev/null
+}
+
 # Helper: truncate text if it exceeds given width
 maxlen() {
     local text="$1" max="$2"
@@ -675,7 +692,7 @@ manage_nebula_certs() {
 
         for cert in "$certs_dir"/*.crt; do
             [[ -f "$cert" ]] || continue
-            local json=$("$NEBULA_BIN_PATH/nebula-cert" print -json -path "$cert")
+            local json=$(nebula_cert_json "$NEBULA_BIN_PATH" "$cert")
             local n=$(jq -r '.details.name' <<<"$json")
             local t=$(jq -r '.details.isCa' <<<"$json"); t=$([[ $t == true ]] && echo "CA" || echo "Cert")
             local i=$(jq -r '.details.ips | join(", ")' <<<"$json"); [[ -z "$i" ]] && i="N/A"
@@ -755,7 +772,7 @@ manage_nebula_certs() {
         local now; now=$(date -u +%s)
         for cert in "$certs_dir"/*.crt; do
             [[ -f "$cert" ]] || continue
-            local json; json=$("$NEBULA_BIN_PATH/nebula-cert" print -json -path "$cert") || continue
+            local json; json=$(nebula_cert_json "$NEBULA_BIN_PATH" "$cert") || continue
             local name type na epoch_na days_left color
             name=$(jq -r '.details.name' <<<"$json")
             type=$(jq -r '.details.isCa'  <<<"$json"); type=$([[ $type == true ]] && echo "CA" || echo "Cert")
@@ -962,7 +979,7 @@ generate_nebula_cert() {
             local ip_taken=false
             for existing_crt in "$certs_dir"/*.crt; do
                 [[ -f "$existing_crt" ]] || continue
-                if "$NEBULA_BIN_PATH/nebula-cert" print -json -path "$existing_crt" | jq -e --arg ip "$cert_gen_ip" '.details.ips[]? == $ip' > /dev/null; then
+                if nebula_cert_json "$NEBULA_BIN_PATH" "$existing_crt" | jq -e --arg ip "$cert_gen_ip" '.details.ips[]? == $ip' > /dev/null; then
                     local used_by=$(basename "$existing_crt")
                     echo -e "$(show_status 'error') ${RED}IP $cert_gen_ip is already assigned in ${CYAN}$used_by${RED}. Choose another.${RESET}"
                     ip_taken=true
@@ -1102,7 +1119,7 @@ check_node_connectivity() {
     for cert in "$certs_dir"/*.crt; do
         [[ -f "$cert" ]] || continue
         local json name
-        json=$("$NEBULA_BIN_PATH/nebula-cert" print -json -path "$cert") || continue
+        json=$(nebula_cert_json "$NEBULA_BIN_PATH" "$cert") || continue
         name=$(jq -r '.details.name' <<<"$json")
 
         while read -r ip; do
@@ -1233,7 +1250,7 @@ revoke_cert() {
             local match="Unknown cert name"
             for cert in "$cert_dir"/*.crt.revoked; do
                 [[ -f "$cert" ]] || continue
-                local cert_fp=$("$bin_path" print -json -path "$cert" | jq -r '.fingerprint')
+                local cert_fp=$(nebula_cert_json "$NEBULA_BIN_PATH" "$cert" | jq -r '.fingerprint')
                 [[ "$cert_fp" == "$fp" ]] && match=$(basename "$cert" .crt.revoked) && break
             done
             echo -e "    ${YELLOW}[$(($i+1))]${RESET} ${CYAN}$fp${RESET} - $match${reason:+ (${MAGENTA}$reason${RESET})}"
@@ -1275,7 +1292,7 @@ revoke_cert() {
 
         for cert in "$cert_dir"/*.crt.revoked; do
             [[ -f "$cert" ]] || continue
-            local cert_fp=$("$bin_path" print -json -path "$cert" | jq -r '.fingerprint')
+            local cert_fp=$(nebula_cert_json "$NEBULA_BIN_PATH" "$cert" | jq -r '.fingerprint')
             if [[ "$cert_fp" == "$fp_to_remove" ]]; then
                 local base="${cert%.crt.revoked}"
                 mv "$cert" "${base}.crt"
@@ -1310,7 +1327,7 @@ revoke_cert() {
             echo -e "$(show_status 'error') ${RED}Certificate not found: $cert_name_or_fingerprint${RESET}"
             return
         fi
-        fingerprint=$("$bin_path" print -json -path "$cert_file" | jq -r '.fingerprint')
+        fingerprint=$(nebula_cert_json "$NEBULA_BIN_PATH" "$cert_file" | jq -r '.fingerprint')
     else
         read -p "$(show_status 'question') Enter the full certificate fingerprint to revoke: " fingerprint
         revoke_by_name=false
